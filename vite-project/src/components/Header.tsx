@@ -2,10 +2,12 @@
 const Header = () => {
   return (
     <>
-    <div className="w-full h-16 bg-red-500">
-        
-      
-    </div>
+        <header className="w-full h-16 bg-red-500">
+         <nav>
+          <ul>
+          </ul>
+         </nav>
+      </header>
     </>
   )
 }
