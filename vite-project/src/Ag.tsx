@@ -159,7 +159,7 @@ function renderNode(node: Node,selectedId: string | null, setSelectedId: (id:str
 
 
 
-function App() {
+function Ag() {
   const [draggingEdge, setDraggingEdge] = useState<string | null>(null);
   const [mousePos, setMousePos] = useState<[number, number]>([0, 0]);
   const [, forceUpdate] = useState(0);
@@ -226,7 +226,14 @@ function App() {
               {
               nodes.map(node => (
                 <g key={node.id}>
-                  {renderNode(node,selectedId,setSelectedId,draggingEdge,setDraggingEdge,graph,() => forceUpdate(v => v + 1)
+                  {renderNode(
+                    node,
+                    selectedId,
+                    setSelectedId,
+                    draggingEdge,
+                    setDraggingEdge,
+                    graph,
+                    () => forceUpdate(v => v + 1)
                   )}
                 </g>
               ))
@@ -241,13 +248,16 @@ function App() {
                   <div className="grid grid-cols-2 w-full h-14 gap-2">
                     <button className="w-full h-full bg-blue-500 rounded-full shadow-xl inset-shadow-white inset-shadow-sm/50 text-white font-bold" onClick={()=> {setAdicionarClicked(true);}}>Adicionar</button>
                     <button className="w-full h-full bg-blue-500 rounded-full shadow-xl inset-shadow-white inset-shadow-sm/50 text-white font-bold" onClick={() => {                     
-                        if (!selectedId) 
-                          return;
+                        if (!selectedId) return;
+
                         graph.removeNode(selectedId);
+
                         setNodes(prev =>
                           prev.filter(node => node.id !== selectedId)
                         );
+
                         setSelectedId(null);
+
                         forceUpdate(v => v + 1);
                       }}>Remover</button>
                   </div>
@@ -262,4 +272,4 @@ function App() {
 
 
 
-export default App
+export default Ag
