@@ -808,7 +808,7 @@ function App() {
       <main className="w-full h-screen bg-gray-400">
         <div className="w-11/12 h-full mx-auto flex flex-row justify-between gap-2">
 
-          {/* Canvas SVG */}
+        
           <div className="w-2/3 h-4/5 self-center">
             <svg
               width="100%" height="100%"
