@@ -5,590 +5,762 @@ import React from "react";
 
 // ─── Estruturas de dados ──────────────────────────────────────────────────────
 
-class Node {
+class No {
   id: string;
-  name: number;
-  coordinates: [number, number];
-  edges: Edge[];
-  constructor(name: number, coordinates: [number, number]) {
+  nome: number;
+  coordenadas: [number, number];
+  arestas: Aresta[];
+
+  constructor(nome: number, coordenadas: [number, number]) {
     this.id = crypto.randomUUID();
-    this.name = name;
-    this.coordinates = coordinates;
-    this.edges = [];
+    this.nome = nome;
+    this.coordenadas = coordenadas;
+    this.arestas = [];
   }
+
   getId(): string { return this.id; }
-  getName(): number { return this.name; }
-  getCoordinates(): [number, number] { return this.coordinates; }
+  getNome(): number { return this.nome; }
+  getCoordenadas(): [number, number] { return this.coordenadas; }
 }
 
-class Edge {
-  to: string;
-  weight: number;
-  constructor(to: string, weight: number) {
-    this.to = to;
-    this.weight = weight;
+class Aresta {
+  destino: string;
+  peso: number;
+
+  constructor(destino: string, peso: number) {
+    this.destino = destino;
+    this.peso = peso;
   }
-  setWeight(weight: number) { this.weight = weight; }
+
+  setPeso(peso: number) { this.peso = peso; }
 }
 
-class Graph {
-  nodes: Map<string, Node>;
-  constructor() { this.nodes = new Map(); }
-  addNode(node: Node) { this.nodes.set(node.id, node); }
-  addEdge(a: string, b: string) {
-    const nodeA = this.nodes.get(a);
-    const nodeB = this.nodes.get(b);
-    if (!nodeA || !nodeB) return;
-    if (nodeA.edges.some(edge => edge.to === b)) return;
-    const dist = Math.sqrt(
-      Math.pow(nodeA.coordinates[0] - nodeB.coordinates[0], 2) +
-      Math.pow(nodeA.coordinates[1] - nodeB.coordinates[1], 2)
+class Grafo {
+  nos: Map<string, No>;
+
+  constructor() { this.nos = new Map(); }
+
+  adicionarNo(no: No) { this.nos.set(no.id, no); }
+
+  adicionarAresta(idA: string, idB: string) {
+    const noA = this.nos.get(idA);
+    const noB = this.nos.get(idB);
+    if (!noA || !noB) return;
+
+    // Evita aresta duplicada
+    const jaExiste = noA.arestas.some(aresta => aresta.destino === idB);
+    if (jaExiste) return;
+
+    const distancia = Math.sqrt(
+      Math.pow(noA.coordenadas[0] - noB.coordenadas[0], 2) +
+      Math.pow(noA.coordenadas[1] - noB.coordenadas[1], 2)
     );
-    nodeA.edges.push(new Edge(b, dist));
-    nodeB.edges.push(new Edge(a, dist));
+
+    noA.arestas.push(new Aresta(idB, distancia));
+    noB.arestas.push(new Aresta(idA, distancia));
   }
-  removeNode(id: string) {
-    const node = this.nodes.get(id);
-    if (!node) return;
-    for (const current of this.nodes.values())
-      current.edges = current.edges.filter(edge => edge.to !== id);
-    this.nodes.delete(id);
+
+  removerNo(id: string) {
+    const no = this.nos.get(id);
+    if (!no) return;
+
+    // Remove todas as arestas que apontam para esse nó
+    for (const noAtual of this.nos.values()) {
+      noAtual.arestas = noAtual.arestas.filter(aresta => aresta.destino !== id);
+    }
+
+    this.nos.delete(id);
   }
 }
 
 
-type TourResult = {
+// ─── Tipos de resultado ───────────────────────────────────────────────────────
+
+type ResultadoTour = {
   tour: string[];
-  totalCost: number;
+  custoTotal: number;
   meta: string;
-  error?: string;
+  erro?: string;
 };
 
-type ApproxResult = TourResult & { mstCost: number };
+type ResultadoAproximacao = ResultadoTour & { custoAGM: number };
 
 
+// ─── Funções utilitárias ──────────────────────────────────────────────────────
 
-function createNode(name: number, coordinates: [number, number]): Node {
-  return new Node(name, coordinates);
+function criarNo(nome: number, coordenadas: [number, number]): No {
+  return new No(nome, coordenadas);
 }
 
-function euclidean(a: Node, b: Node): number {
+function distanciaEuclidiana(a: No, b: No): number {
   return Math.sqrt(
-    Math.pow(a.coordinates[0] - b.coordinates[0], 2) +
-    Math.pow(a.coordinates[1] - b.coordinates[1], 2)
+    Math.pow(a.coordenadas[0] - b.coordenadas[0], 2) +
+    Math.pow(a.coordenadas[1] - b.coordenadas[1], 2)
   );
 }
 
-function getDrawnEdges(graph: Graph): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const node of graph.nodes.values()) {
-    for (const edge of node.edges) {
-      const key = node.id < edge.to
-        ? `${node.id}|${edge.to}`
-        : `${edge.to}|${node.id}`;
-      map.set(key, edge.weight);
+function obterArestasDesenhadas(grafo: Grafo): Map<string, number> {
+  const mapa = new Map<string, number>();
+
+  for (const no of grafo.nos.values()) {
+    for (const aresta of no.arestas) {
+      // Garante chave única independente da direção
+      const chave = no.id < aresta.destino
+        ? `${no.id}|${aresta.destino}`
+        : `${aresta.destino}|${no.id}`;
+      mapa.set(chave, aresta.peso);
     }
   }
-  return map;
+
+  return mapa;
+}
+
+function pesoAresta(idA: string, idB: string, arestasDesenhadas: Map<string, number>): number {
+  const chave = idA < idB ? `${idA}|${idB}` : `${idB}|${idA}`;
+  return arestasDesenhadas.get(chave) ?? Infinity;
 }
 
 
-function drawnWeight(a: string, b: string, drawnEdges: Map<string, number>): number {
-  const key = a < b ? `${a}|${b}` : `${b}|${a}`;
-  return drawnEdges.get(key) ?? Infinity;
-}
+// ─── Renderização das arestas ─────────────────────────────────────────────────
 
-
-function renderEdges(
-  graph: Graph,
-  tourEdgeSet?: Set<string>,
-  tourNodeMap?: Map<string, Node>
+function renderizarArestas(
+  grafo: Grafo,
+  arestasDoTour?: Set<string>,
+  mapaDeNos?: Map<string, No>
 ) {
-  const rendered = new Set<string>();
-  const elements: React.JSX.Element[] = [];
+  const jaRenderizadas = new Set<string>();
+  const elementos: React.JSX.Element[] = [];
 
-  for (const node of graph.nodes.values()) {
-    for (const edge of node.edges) {
-      const key = node.id < edge.to ? `${node.id}|${edge.to}` : `${edge.to}|${node.id}`;
-      if (rendered.has(key)) continue;
-      rendered.add(key);
-      const target = graph.nodes.get(edge.to);
-      if (!target) 
-        continue;
-      const isHighlighted = tourEdgeSet?.has(key) ?? false;
-      elements.push(
-        <g key={`ge-${key}`}>
+  for (const no of grafo.nos.values()) {
+    for (const aresta of no.arestas) {
+      const chave = no.id < aresta.destino
+        ? `${no.id}|${aresta.destino}`
+        : `${aresta.destino}|${no.id}`;
+
+      if (jaRenderizadas.has(chave)) continue;
+      jaRenderizadas.add(chave);
+
+      const destino = grafo.nos.get(aresta.destino);
+      if (!destino) continue;
+
+      const estaNoTour = arestasDoTour?.has(chave) ?? false;
+
+      elementos.push(
+        <g key={`aresta-${chave}`}>
           <line
-            x1={node.coordinates[0]} y1={node.coordinates[1]}
-            x2={target.coordinates[0]} y2={target.coordinates[1]}
-            stroke={isHighlighted ? "#86efac" : "white"}
-            strokeWidth={isHighlighted ? 3 : 2}
-            strokeOpacity={isHighlighted ? 1 : 0.5}
+            x1={no.coordenadas[0]} y1={no.coordenadas[1]}
+            x2={destino.coordenadas[0]} y2={destino.coordenadas[1]}
+            stroke={estaNoTour ? "#86efac" : "white"}
+            strokeWidth={estaNoTour ? 3 : 2}
+            strokeOpacity={estaNoTour ? 1 : 0.5}
           />
           <text
-            x={(node.coordinates[0] + target.coordinates[0]) / 2}
-            y={(node.coordinates[1] + target.coordinates[1]) / 2}
+            x={(no.coordenadas[0] + destino.coordenadas[0]) / 2}
+            y={(no.coordenadas[1] + destino.coordenadas[1]) / 2}
             textAnchor="middle"
-            fill={isHighlighted ? "#86efac" : "white"}
+            fill={estaNoTour ? "#86efac" : "white"}
             fontSize={12}
             dy={-6}
           >
-            {Math.round(edge.weight)}
+            {Math.round(aresta.peso)}
           </text>
         </g>
       );
     }
   }
 
-  // Arestas do tour que NÃO foram desenhadas (não deveria acontecer agora,
-  // mas mantido para compatibilidade visual caso exista)
-  if (tourEdgeSet && tourNodeMap) {
-    for (const key of tourEdgeSet) {
-      if (rendered.has(key)) continue;
-      const [fromId, toId] = key.split('|');
-      const from = tourNodeMap.get(fromId);
-      const to   = tourNodeMap.get(toId);
-      if (!from || !to) continue;
-      elements.push(
-        <g key={`te-${key}`}>
+  // Arestas do tour que não foram desenhadas no grafo (fallback visual)
+  if (arestasDoTour && mapaDeNos) {
+    for (const chave of arestasDoTour) {
+      if (jaRenderizadas.has(chave)) continue;
+
+      const [idOrigem, idDestino] = chave.split('|');
+      const origem  = mapaDeNos.get(idOrigem);
+      const destino = mapaDeNos.get(idDestino);
+      if (!origem || !destino) continue;
+
+      elementos.push(
+        <g key={`tour-${chave}`}>
           <line
-            x1={from.coordinates[0]} y1={from.coordinates[1]}
-            x2={to.coordinates[0]}   y2={to.coordinates[1]}
+            x1={origem.coordenadas[0]}  y1={origem.coordenadas[1]}
+            x2={destino.coordenadas[0]} y2={destino.coordenadas[1]}
             stroke="#86efac"
             strokeWidth={2}
             strokeOpacity={0.85}
             strokeDasharray="6 3"
           />
           <text
-            x={(from.coordinates[0] + to.coordinates[0]) / 2}
-            y={(from.coordinates[1] + to.coordinates[1]) / 2}
+            x={(origem.coordenadas[0] + destino.coordenadas[0]) / 2}
+            y={(origem.coordenadas[1] + destino.coordenadas[1]) / 2}
             textAnchor="middle"
             fill="#86efac"
             fontSize={12}
             dy={-6}
           >
-            {Math.round(euclidean(from, to))}
+            {Math.round(distanciaEuclidiana(origem, destino))}
           </text>
         </g>
       );
     }
   }
 
-  return elements;
+  return elementos;
 }
 
-function renderNode(
-  node: Node,
-  selectedId: string | null,
-  setSelectedId: (id: string) => void,
-  draggingEdge: string | null,
-  setDraggingEdge: (id: string | null) => void,
-  graph: Graph,
-  refresh: () => void
+
+// ─── Renderização de um nó ────────────────────────────────────────────────────
+
+function renderizarNo(
+  no: No,
+  idSelecionado: string | null,
+  setSelecionado: (id: string) => void,
+  idArrastando: string | null,
+  setArrastando: (id: string | null) => void,
+  grafo: Grafo,
+  atualizar: () => void
 ) {
-  const isSelected = selectedId === node.id;
+  const estaSelecionado = idSelecionado === no.id;
+
   return (
     <>
       <circle
         r={28}
-        cx={node.coordinates[0]}
-        cy={node.coordinates[1]}
-        fill={isSelected ? "rgba(99,102,241,0.90)" : "rgba(100,100,100,0.75)"}
-        stroke={isSelected ? "#a5b4fc" : "rgba(255,255,255,0.75)"}
-        strokeWidth={isSelected ? 3 : 2}
+        cx={no.coordenadas[0]}
+        cy={no.coordenadas[1]}
+        fill={estaSelecionado ? "rgba(99,102,241,0.90)" : "rgba(100,100,100,0.75)"}
+        stroke={estaSelecionado ? "#a5b4fc" : "rgba(255,255,255,0.75)"}
+        strokeWidth={estaSelecionado ? 3 : 2}
         style={{ cursor: "pointer" }}
-        onClick={(e) => { e.stopPropagation(); setSelectedId(node.id); }}
-        onMouseDown={(e) => { e.stopPropagation(); setDraggingEdge(node.id); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          setSelecionado(no.id);
+        }}
+        onMouseDown={(e) => {
+          e.stopPropagation();
+          setArrastando(no.id);
+        }}
         onMouseUp={(e) => {
           e.stopPropagation();
-          if (draggingEdge && draggingEdge !== node.id) {
-            graph.addEdge(draggingEdge, node.id);
-            refresh();
+          if (idArrastando && idArrastando !== no.id) {
+            grafo.adicionarAresta(idArrastando, no.id);
+            atualizar();
           }
-          setDraggingEdge(null);
+          setArrastando(null);
         }}
       />
       <text
-        x={node.getCoordinates()[0]}
-        y={node.getCoordinates()[1] + 5}
+        x={no.getCoordenadas()[0]}
+        y={no.getCoordenadas()[1] + 5}
         fill="white"
         fontSize={14}
         fontWeight="bold"
         textAnchor="middle"
         style={{ pointerEvents: "none", userSelect: "none" }}
       >
-        {node.name}
+        {no.nome}
       </text>
     </>
   );
 }
 
-function tourToEdgeSet(tour: string[]): Set<string> {
-  const s = new Set<string>();
+
+// ─── Converte um tour em conjunto de arestas ──────────────────────────────────
+
+function tourParaConjuntoDeArestas(tour: string[]): Set<string> {
+  const conjunto = new Set<string>();
+
   for (let i = 0; i < tour.length; i++) {
-    const a = tour[i];
-    const b = tour[(i + 1) % tour.length];
-    s.add(a < b ? `${a}|${b}` : `${b}|${a}`);
+    const idA = tour[i];
+    const idB = tour[(i + 1) % tour.length];
+    conjunto.add(idA < idB ? `${idA}|${idB}` : `${idB}|${idA}`);
   }
-  return s;
+
+  return conjunto;
 }
 
 
-function runApproxTSP(graph: Graph): ApproxResult {
-  const nodeList = Array.from(graph.nodes.values());
-  const n = nodeList.length;
-  if (n < 2) 
-    return { tour: [], totalCost: 0, mstCost: 0, meta: "", error: "Adicione pelo menos 2 nós." };
+// ─── 1. Algoritmo de Aproximação (AGM via Kruskal + DFS) ──────────────────────
 
-  const drawnEdges = getDrawnEdges(graph);
-  if (drawnEdges.size === 0)
-    return { tour: [], totalCost: 0, mstCost: 0, meta: "", error: "Desenhe arestas entre os nós." };
+function executarAproximacaoTSP(grafo: Grafo): ResultadoAproximacao {
+  const listaDeNos = Array.from(grafo.nos.values());
+  const quantidadeNos = listaDeNos.length;
 
-  const allEdges: { from: number; to: number; weight: number }[] = [];
-  for (const [key, weight] of drawnEdges) {
-    const [aId, bId] = key.split('|');
-    const fromIdx = nodeList.findIndex(nd => nd.id === aId);
-    const toIdx   = nodeList.findIndex(nd => nd.id === bId);
-    if (fromIdx !== -1 && toIdx !== -1)
-      allEdges.push({ from: fromIdx, to: toIdx, weight });
-  }
-  allEdges.sort((a, b) => a.weight - b.weight);
+  if (quantidadeNos < 2)
+    return { tour: [], custoTotal: 0, custoAGM: 0, meta: "", erro: "Adicione pelo menos 2 nós." };
 
-  const parent = Array.from({ length: n }, (_, i) => i);
-  const rank   = new Array(n).fill(0);
-  function find(x: number): number {
-    if (parent[x] !== x) parent[x] = find(parent[x]);
-    return parent[x];
-  }
-  function union(a: number, b: number) {
-    const ra = find(a), rb = find(b);
-    if (ra === rb) return;
-    if (rank[ra] < rank[rb]) parent[ra] = rb;
-    else if (rank[ra] > rank[rb]) parent[rb] = ra;
-    else { parent[rb] = ra; rank[ra]++; }
-  }
+  const arestasDesenhadas = obterArestasDesenhadas(grafo);
 
-  const mstAdj: number[][] = Array.from({ length: n }, () => []);
-  let mstCost = 0, edgesAdded = 0;
-  for (const e of allEdges) {
-    if (find(e.from) !== find(e.to)) {
-      union(e.from, e.to);
-      mstAdj[e.from].push(e.to);
-      mstAdj[e.to].push(e.from);
-      mstCost += e.weight;
-      edgesAdded++;
-      if (edgesAdded === n - 1) break;
+  if (arestasDesenhadas.size === 0)
+    return { tour: [], custoTotal: 0, custoAGM: 0, meta: "", erro: "Desenhe arestas entre os nós." };
+
+  // Monta lista de arestas com índices numéricos
+  const listaArestas: { de: number; para: number; peso: number }[] = [];
+
+  for (const [chave, peso] of arestasDesenhadas) {
+    const [idA, idB] = chave.split('|');
+    const indiceDe   = listaDeNos.findIndex(no => no.id === idA);
+    const indicePara = listaDeNos.findIndex(no => no.id === idB);
+    if (indiceDe !== -1 && indicePara !== -1) {
+      listaArestas.push({ de: indiceDe, para: indicePara, peso });
     }
   }
 
-  if (edgesAdded < n - 1)
-    return { tour: [], totalCost: 0, mstCost: 0, meta: "", error: "O grafo não é conexo com as arestas desenhadas. Conecte todos os nós." };
+  listaArestas.sort((a, b) => a.peso - b.peso);
 
-  const visited = new Array(n).fill(false);
-  const tourIdx: number[] = [];
-  const stack = [0];
-  while (stack.length > 0) {
-    const v = stack.pop()!;
-    if (visited[v]) continue;
-    visited[v] = true;
-    tourIdx.push(v);
-    for (let k = mstAdj[v].length - 1; k >= 0; k--)
-      if (!visited[mstAdj[v][k]]) stack.push(mstAdj[v][k]);
+  // Union-Find para construir a AGM
+  const pai   = Array.from({ length: quantidadeNos }, (_, i) => i);
+  const grau  = new Array(quantidadeNos).fill(0);
+
+  function encontrar(x: number): number {
+    if (pai[x] !== x) pai[x] = encontrar(pai[x]);
+    return pai[x];
   }
 
-  let tCost = 0;
-  for (let i = 0; i < tourIdx.length; i++) {
-    const aId = nodeList[tourIdx[i]].id;
-    const bId = nodeList[tourIdx[(i + 1) % tourIdx.length]].id;
-    tCost += drawnWeight(aId, bId, drawnEdges);
+  function unir(a: number, b: number) {
+    const raizA = encontrar(a);
+    const raizB = encontrar(b);
+    if (raizA === raizB) return;
+    if (grau[raizA] < grau[raizB])      pai[raizA] = raizB;
+    else if (grau[raizA] > grau[raizB]) pai[raizB] = raizA;
+    else { pai[raizB] = raizA; grau[raizA]++; }
+  }
+
+  // Constrói a AGM com Kruskal
+  const adjacenciaAGM: number[][] = Array.from({ length: quantidadeNos }, () => []);
+  let custoAGM     = 0;
+  let arestasAdicionadas = 0;
+
+  for (const aresta of listaArestas) {
+    if (encontrar(aresta.de) !== encontrar(aresta.para)) {
+      unir(aresta.de, aresta.para);
+      adjacenciaAGM[aresta.de].push(aresta.para);
+      adjacenciaAGM[aresta.para].push(aresta.de);
+      custoAGM += aresta.peso;
+      arestasAdicionadas++;
+      if (arestasAdicionadas === quantidadeNos - 1) break;
+    }
+  }
+
+  if (arestasAdicionadas < quantidadeNos - 1)
+    return {
+      tour: [], custoTotal: 0, custoAGM: 0, meta: "",
+      erro: "O grafo não é conexo com as arestas desenhadas. Conecte todos os nós."
+    };
+
+  // DFS pré-ordem sobre a AGM para gerar o tour
+  const visitado = new Array(quantidadeNos).fill(false);
+  const indicesDoTour: number[] = [];
+  const pilha = [0];
+
+  while (pilha.length > 0) {
+    const vertice = pilha.pop()!;
+    if (visitado[vertice]) continue;
+    visitado[vertice] = true;
+    indicesDoTour.push(vertice);
+
+    for (let k = adjacenciaAGM[vertice].length - 1; k >= 0; k--) {
+      if (!visitado[adjacenciaAGM[vertice][k]]) {
+        pilha.push(adjacenciaAGM[vertice][k]);
+      }
+    }
+  }
+
+  // Calcula custo total usando as arestas desenhadas
+  let custoTotal = 0;
+  for (let i = 0; i < indicesDoTour.length; i++) {
+    const idA = listaDeNos[indicesDoTour[i]].id;
+    const idB = listaDeNos[indicesDoTour[(i + 1) % indicesDoTour.length]].id;
+    custoTotal += pesoAresta(idA, idB, arestasDesenhadas);
   }
 
   return {
-    tour: tourIdx.map(i => nodeList[i].id),
-    totalCost: tCost,
-    mstCost,
-    meta: `AGM (arestas desenhadas): ${Math.round(mstCost)} · O(E log E)`,
+    tour: indicesDoTour.map(i => listaDeNos[i].id),
+    custoTotal,
+    custoAGM,
+    meta: `AGM (arestas desenhadas): ${Math.round(custoAGM)} · O(E log E)`,
   };
 }
 
+
 // ─── 2. Algoritmo Genético ────────────────────────────────────────────────────
-//
-// A matriz de distâncias usa apenas arestas desenhadas: pares sem aresta
-// recebem peso Infinity, tornando tours que os usam automaticamente piores.
-// O AG naturalmente evita esses pares ao minimizar o custo total.
-function runGeneticTSP(graph: Graph): TourResult {
-  const nodeList = Array.from(graph.nodes.values());
-  const n = nodeList.length;
-  if (n < 2) return { tour: [], totalCost: 0, meta: "", error: "Adicione pelo menos 2 nós." };
 
-  const drawnEdges = getDrawnEdges(graph);
-  if (drawnEdges.size === 0)
-    return { tour: [], totalCost: 0, meta: "", error: "Desenhe arestas entre os nós." };
+function executarAGTSP(grafo: Grafo): ResultadoTour {
+  const listaDeNos = Array.from(grafo.nos.values());
+  const quantidadeNos = listaDeNos.length;
 
-  const dist: number[][] = Array.from({ length: n }, (_, i) =>
-    Array.from({ length: n }, (__, j) => {
+  if (quantidadeNos < 2)
+    return { tour: [], custoTotal: 0, meta: "", erro: "Adicione pelo menos 2 nós." };
+
+  const arestasDesenhadas = obterArestasDesenhadas(grafo);
+
+  if (arestasDesenhadas.size === 0)
+    return { tour: [], custoTotal: 0, meta: "", erro: "Desenhe arestas entre os nós." };
+
+  // Matriz de distâncias: Infinity para pares sem aresta desenhada
+  const matrizDistancias: number[][] = Array.from({ length: quantidadeNos }, (_, i) =>
+    Array.from({ length: quantidadeNos }, (__, j) => {
       if (i === j) return 0;
-      return drawnWeight(nodeList[i].id, nodeList[j].id, drawnEdges);
+      return pesoAresta(listaDeNos[i].id, listaDeNos[j].id, arestasDesenhadas);
     })
   );
 
-  type Chrom = number[];
+  type Cromossomo = number[];
 
-  function chromCost(c: Chrom): number {
-    let s = 0;
-    for (let i = 0; i < n; i++) s += dist[c[i]][c[(i + 1) % n]];
-    return s;
-  }
-
-  function randomChrom(): Chrom {
-    const c = Array.from({ length: n }, (_, i) => i);
-    for (let i = n - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [c[i], c[j]] = [c[j], c[i]];
+  function calcularCusto(cromossomo: Cromossomo): number {
+    let custo = 0;
+    for (let i = 0; i < quantidadeNos; i++) {
+      custo += matrizDistancias[cromossomo[i]][cromossomo[(i + 1) % quantidadeNos]];
     }
-    return c;
+    return custo;
   }
 
-  function crossover(a: Chrom, b: Chrom): Chrom {
-    const lo = Math.floor(Math.random() * n);
-    const hi = lo + Math.floor(Math.random() * (n - lo));
-    const child = new Array(n).fill(-1);
-    for (let i = lo; i <= hi; i++) child[i] = a[i];
-    const inChild = new Set(child.filter(g => g !== -1));
-    let pos = (hi + 1) % n;
-    for (let k = 0; k < n; k++) {
-      const gene = b[(hi + 1 + k) % n];
-      if (!inChild.has(gene)) {
-        child[pos] = gene;
-        inChild.add(gene);
-        pos = (pos + 1) % n;
+  function cromossomoAleatorio(): Cromossomo {
+    const cromossomo = Array.from({ length: quantidadeNos }, (_, i) => i);
+    // Embaralha com Fisher-Yates
+    for (let i = quantidadeNos - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const temp = cromossomo[i];
+      cromossomo[i] = cromossomo[j];
+      cromossomo[j] = temp;
+    }
+    return cromossomo;
+  }
+
+  function cruzamento(pai: Cromossomo, mae: Cromossomo): Cromossomo {
+    // OX Crossover: copia segmento do pai e preenche com genes da mãe
+    const inicio = Math.floor(Math.random() * quantidadeNos);
+    const fim    = inicio + Math.floor(Math.random() * (quantidadeNos - inicio));
+
+    const filho = new Array(quantidadeNos).fill(-1);
+
+    // Copia o segmento do pai
+    for (let i = inicio; i <= fim; i++) {
+      filho[i] = pai[i];
+    }
+
+    // Preenche o restante com genes da mãe, na ordem
+    const genesNoFilho = new Set(filho.filter(gene => gene !== -1));
+    let posicao = (fim + 1) % quantidadeNos;
+
+    for (let k = 0; k < quantidadeNos; k++) {
+      const gene = mae[(fim + 1 + k) % quantidadeNos];
+      if (!genesNoFilho.has(gene)) {
+        filho[posicao] = gene;
+        genesNoFilho.add(gene);
+        posicao = (posicao + 1) % quantidadeNos;
       }
     }
-    return child;
+
+    return filho;
   }
 
-  function mutate(c: Chrom): Chrom {
-    if (Math.random() > 0.25) return c;
-    const m = [...c];
-    const i = Math.floor(Math.random() * n);
-    const j = Math.floor(Math.random() * n);
-    if (Math.random() < 0.5) {
-      [m[i], m[j]] = [m[j], m[i]];
+  function mutar(cromossomo: Cromossomo): Cromossomo {
+    const CHANCE_MUTACAO = 0.25;
+    if (Math.random() > CHANCE_MUTACAO) return cromossomo;
+
+    const resultado = [...cromossomo];
+    const indiceA = Math.floor(Math.random() * quantidadeNos);
+    const indiceB = Math.floor(Math.random() * quantidadeNos);
+
+    const usarSwapSimples = Math.random() < 0.5;
+
+    if (usarSwapSimples) {
+      // Troca dois genes de posição
+      const temp = resultado[indiceA];
+      resultado[indiceA] = resultado[indiceB];
+      resultado[indiceB] = temp;
     } else {
-      const [lo, hi] = i <= j ? [i, j] : [j, i];
-      let l = lo, r = hi;
-      while (l < r) { [m[l], m[r]] = [m[r], m[l]]; l++; r--; }
+      // Inverte o trecho entre indiceA e indiceB (mutação 2-opt)
+      const inicio = Math.min(indiceA, indiceB);
+      const fim    = Math.max(indiceA, indiceB);
+
+      let esquerda = inicio;
+      let direita  = fim;
+
+      while (esquerda < direita) {
+        const temp = resultado[esquerda];
+        resultado[esquerda] = resultado[direita];
+        resultado[direita]  = temp;
+        esquerda++;
+        direita--;
+      }
     }
-    return m;
+
+    return resultado;
   }
 
-  const POP_SIZE = 100;
-  const GENERATIONS = 400;
-  const ELITE = 8;
+  const TAMANHO_POPULACAO = 100;
+  const GERACOES          = 400;
+  const ELITE             = 8;
 
-  let pop: Chrom[] = Array.from({ length: POP_SIZE }, randomChrom);
-  let bestCost = Infinity;
-  let bestChrom: Chrom = pop[0];
+  let populacao: Cromossomo[] = Array.from({ length: TAMANHO_POPULACAO }, cromossomoAleatorio);
+  let melhorCusto    = Infinity;
+  let melhorCromossomo: Cromossomo = populacao[0];
 
-  for (let gen = 0; gen < GENERATIONS; gen++) {
-    const fitness = pop.map(chromCost);
-    const order = Array.from({ length: POP_SIZE }, (_, i) => i)
-      .sort((a, b) => fitness[a] - fitness[b]);
+  for (let geracao = 0; geracao < GERACOES; geracao++) {
+    // Avalia aptidão e ordena do melhor para o pior
+    const aptidoes = populacao.map(calcularCusto);
+    const ordemPorAptidao = Array.from({ length: TAMANHO_POPULACAO }, (_, i) => i)
+      .sort((a, b) => aptidoes[a] - aptidoes[b]);
 
-    if (fitness[order[0]] < bestCost) {
-      bestCost = fitness[order[0]];
-      bestChrom = [...pop[order[0]]];
+    if (aptidoes[ordemPorAptidao[0]] < melhorCusto) {
+      melhorCusto     = aptidoes[ordemPorAptidao[0]];
+      melhorCromossomo = [...populacao[ordemPorAptidao[0]]];
     }
 
-    const next: Chrom[] = order.slice(0, ELITE).map(i => [...pop[i]]);
-    while (next.length < POP_SIZE) {
-      const pickIdx = () => {
-        const i = Math.floor(Math.random() * POP_SIZE);
-        const j = Math.floor(Math.random() * POP_SIZE);
-        return fitness[i] <= fitness[j] ? i : j;
-      };
-      next.push(mutate(crossover(pop[pickIdx()], pop[pickIdx()])));
+    // Elitismo: mantém os melhores direto
+    const proxGeracap: Cromossomo[] = ordemPorAptidao.slice(0, ELITE).map(i => [...populacao[i]]);
+
+    // Torneio para selecionar pais e gerar filhos
+    function selecionarPorTorneio(): number {
+      const i = Math.floor(Math.random() * TAMANHO_POPULACAO);
+      const j = Math.floor(Math.random() * TAMANHO_POPULACAO);
+      return aptidoes[i] <= aptidoes[j] ? i : j;
     }
-    pop = next;
+
+    while (proxGeracap.length < TAMANHO_POPULACAO) {
+      const pai = populacao[selecionarPorTorneio()];
+      const mae = populacao[selecionarPorTorneio()];
+      proxGeracap.push(mutar(cruzamento(pai, mae)));
+    }
+
+    populacao = proxGeracap;
   }
 
-  if (bestCost === Infinity)
-    return { tour: [], totalCost: 0, meta: "", error: "Nenhum tour válido encontrado. Verifique se o grafo é conexo com as arestas desenhadas." };
+  if (melhorCusto === Infinity)
+    return {
+      tour: [], custoTotal: 0, meta: "",
+      erro: "Nenhum tour válido encontrado. Verifique se o grafo é conexo com as arestas desenhadas."
+    };
 
   return {
-    tour: bestChrom.map(i => nodeList[i].id),
-    totalCost: bestCost,
-    meta: `${GENERATIONS} gerações · pop ${POP_SIZE} · arestas desenhadas`,
+    tour: melhorCromossomo.map(i => listaDeNos[i].id),
+    custoTotal: melhorCusto,
+    meta: `${GERACOES} gerações · pop ${TAMANHO_POPULACAO} · arestas desenhadas`,
   };
 }
 
-const TSP_MAX_NODES = 10;
 
-function tourCostDrawn(
-  nodeList: Node[],
-  perm: number[],
-  drawnEdges: Map<string, number>
+// ─── 3. Força Bruta (TSP exato) ───────────────────────────────────────────────
+
+const MAX_NOS_FORCA_BRUTA = 10;
+
+function calcularCustoTour(
+  listaDeNos: No[],
+  permutacao: number[],
+  arestasDesenhadas: Map<string, number>
 ): number {
-  let s = 0;
-  for (let i = 0; i < perm.length; i++) {
-    const aId = nodeList[perm[i]].id;
-    const bId = nodeList[perm[(i + 1) % perm.length]].id;
-    const w = drawnWeight(aId, bId, drawnEdges);
-    if (w === Infinity) return Infinity; // tour inválido
-    s += w;
+  let custo = 0;
+  for (let i = 0; i < permutacao.length; i++) {
+    const idA = listaDeNos[permutacao[i]].id;
+    const idB = listaDeNos[permutacao[(i + 1) % permutacao.length]].id;
+    const peso = pesoAresta(idA, idB, arestasDesenhadas);
+    if (peso === Infinity) return Infinity; // tour inválido
+    custo += peso;
   }
-  return s;
+  return custo;
 }
 
-function* permutations(arr: number[]): Generator<number[]> {
+function* gerarPermutacoes(arr: number[]): Generator<number[]> {
   const n = arr.length;
-  const c = new Array(n).fill(0);
+  const contadores = new Array(n).fill(0);
   yield [...arr];
+
   let i = 0;
   while (i < n) {
-    if (c[i] < i) {
-      if (i % 2 === 0) [arr[0], arr[i]] = [arr[i], arr[0]];
-      else             [arr[c[i]], arr[i]] = [arr[i], arr[c[i]]];
+    if (contadores[i] < i) {
+      if (i % 2 === 0) {
+        // Troca com o primeiro
+        const temp = arr[0];
+        arr[0] = arr[i];
+        arr[i] = temp;
+      } else {
+        // Troca com o elemento na posição do contador
+        const temp = arr[contadores[i]];
+        arr[contadores[i]] = arr[i];
+        arr[i] = temp;
+      }
       yield [...arr];
-      c[i]++;
+      contadores[i]++;
       i = 0;
-    } else { c[i] = 0; i++; }
+    } else {
+      contadores[i] = 0;
+      i++;
+    }
   }
 }
 
-function runBruteForceTSP(graph: Graph): TourResult {
-  const nodeList = Array.from(graph.nodes.values());
-  const n = nodeList.length;
-  if (n < 2) return { tour: [], totalCost: 0, meta: "", error: "Adicione pelo menos 2 nós." };
-  if (n > TSP_MAX_NODES) return {
-    tour: [], totalCost: 0, meta: "",
-    error: `Força bruta limitada a ${TSP_MAX_NODES} nós (atual: ${n}). Remova alguns nós.`,
-  };
+function executarForcaBrutaTSP(grafo: Grafo): ResultadoTour {
+  const listaDeNos = Array.from(grafo.nos.values());
+  const quantidadeNos = listaDeNos.length;
 
-  const drawnEdges = getDrawnEdges(graph);
-  if (drawnEdges.size === 0)
-    return { tour: [], totalCost: 0, meta: "", error: "Desenhe arestas entre os nós." };
+  if (quantidadeNos < 2)
+    return { tour: [], custoTotal: 0, meta: "", erro: "Adicione pelo menos 2 nós." };
 
-  const rest = Array.from({ length: n - 1 }, (_, i) => i + 1);
-  let bestTour: number[] = [];
-  let bestCost = Infinity;
-  let tested = 0;
+  if (quantidadeNos > MAX_NOS_FORCA_BRUTA)
+    return {
+      tour: [], custoTotal: 0, meta: "",
+      erro: `Força bruta limitada a ${MAX_NOS_FORCA_BRUTA} nós (atual: ${quantidadeNos}). Remova alguns nós.`,
+    };
 
-  for (const perm of permutations(rest)) {
-    const full = [0, ...perm];
-    const cost = tourCostDrawn(nodeList, full, drawnEdges);
-    tested++;
-    if (cost < bestCost) { bestCost = cost; bestTour = [...full]; }
+  const arestasDesenhadas = obterArestasDesenhadas(grafo);
+
+  if (arestasDesenhadas.size === 0)
+    return { tour: [], custoTotal: 0, meta: "", erro: "Desenhe arestas entre os nós." };
+
+  // Fixa o nó 0 e permuta os demais para evitar tours equivalentes
+  const indicesRestantes = Array.from({ length: quantidadeNos - 1 }, (_, i) => i + 1);
+  let melhorTour: number[] = [];
+  let melhorCusto = Infinity;
+  let permutacoesTestadas = 0;
+
+  for (const permutacao of gerarPermutacoes(indicesRestantes)) {
+    const tourCompleto = [0, ...permutacao];
+    const custo = calcularCustoTour(listaDeNos, tourCompleto, arestasDesenhadas);
+    permutacoesTestadas++;
+    if (custo < melhorCusto) {
+      melhorCusto = custo;
+      melhorTour  = [...tourCompleto];
+    }
   }
 
-  if (bestCost === Infinity)
-    return { tour: [], totalCost: 0, meta: "", error: "Nenhum tour válido encontrado. Verifique se o grafo é hamiltoniano com as arestas desenhadas." };
+  if (melhorCusto === Infinity)
+    return {
+      tour: [], custoTotal: 0, meta: "",
+      erro: "Nenhum tour válido encontrado. Verifique se o grafo é hamiltoniano com as arestas desenhadas."
+    };
 
   return {
-    tour: bestTour.map(i => nodeList[i].id),
-    totalCost: bestCost,
-    meta: `${tested.toLocaleString("pt-BR")} permutações · arestas desenhadas`,
+    tour: melhorTour.map(i => listaDeNos[i].id),
+    custoTotal: melhorCusto,
+    meta: `${permutacoesTestadas.toLocaleString("pt-BR")} permutações · arestas desenhadas`,
   };
 }
 
 
-function TourPanel({
-  result,
-  graph,
-  color,
-  emptyLabel,
-  emptyHint,
-  infoLabel,
-  totalLabel,
+// ─── Painel de resultado do tour ──────────────────────────────────────────────
+
+function PainelTour({
+  resultado,
+  grafo,
+  cor,
+  labelVazio,
+  dicaVazia,
+  labelInfo,
+  labelTotal,
 }: {
-  result: TourResult | ApproxResult | null;
-  graph: Graph;
-  color: "blue" | "green" | "orange";
-  emptyLabel: string;
-  emptyHint: string;
-  infoLabel: string;
-  totalLabel: string;
+  resultado: ResultadoTour | ResultadoAproximacao | null;
+  grafo: Grafo;
+  cor: "azul" | "verde" | "laranja";
+  labelVazio: string;
+  dicaVazia: string;
+  labelInfo: string;
+  labelTotal: string;
 }) {
-  const c = {
-    blue:   { badge: "bg-blue-500/30",   card: "bg-blue-500/20 border-blue-400/30",   cardRet: "bg-blue-500/10 border-blue-400/20",   total: "bg-blue-500/20 border-blue-400/40",   text: "text-blue-300" },
-    green:  { badge: "bg-green-500/30",  card: "bg-green-500/20 border-green-400/30", cardRet: "bg-green-500/10 border-green-400/20", total: "bg-green-500/20 border-green-400/40", text: "text-green-300" },
-    orange: { badge: "bg-orange-500/30", card: "bg-orange-500/20 border-orange-400/30", cardRet: "bg-orange-500/10 border-orange-400/20", total: "bg-orange-500/20 border-orange-400/40", text: "text-orange-300" },
-  }[color];
+  const estilos = {
+    azul: {
+      badge:  "bg-blue-500/30",
+      card:   "bg-blue-500/20 border-blue-400/30",
+      cardRet:"bg-blue-500/10 border-blue-400/20",
+      total:  "bg-blue-500/20 border-blue-400/40",
+      texto:  "text-blue-300"
+    },
+    verde: {
+      badge:  "bg-green-500/30",
+      card:   "bg-green-500/20 border-green-400/30",
+      cardRet:"bg-green-500/10 border-green-400/20",
+      total:  "bg-green-500/20 border-green-400/40",
+      texto:  "text-green-300"
+    },
+    laranja: {
+      badge:  "bg-orange-500/30",
+      card:   "bg-orange-500/20 border-orange-400/30",
+      cardRet:"bg-orange-500/10 border-orange-400/20",
+      total:  "bg-orange-500/20 border-orange-400/40",
+      texto:  "text-orange-300"
+    },
+  }[cor];
 
   return (
     <>
       <div className="px-4 pt-3 pb-2 flex-shrink-0">
-        {result && !result.error && (
+        {resultado && !resultado.erro && (
           <div className="flex gap-2 flex-wrap">
-            <span className={`text-xs ${c.badge} text-white rounded-full px-2 py-0.5`}>
-              {result.tour.length} cidades
+            <span className={`text-xs ${estilos.badge} text-white rounded-full px-2 py-0.5`}>
+              {resultado.tour.length} cidades
             </span>
             <span className="text-xs bg-white/20 text-white rounded-full px-2 py-0.5">
-              Custo: {Math.round(result.totalCost)}
+              Custo: {Math.round(resultado.custoTotal)}
             </span>
             <span className="text-xs bg-white/10 text-white/70 rounded-full px-2 py-0.5">
-              {result.meta}
+              {resultado.meta}
             </span>
           </div>
         )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-1 min-h-0">
-        {!result ? (
+        {!resultado ? (
           <div className="h-full flex flex-col items-center justify-center text-white/50 text-sm gap-2">
-            <span>{emptyLabel}</span>
-            <span className="text-xs text-center px-4 text-white/35">{emptyHint}</span>
+            <span>{labelVazio}</span>
+            <span className="text-xs text-center px-4 text-white/35">{dicaVazia}</span>
           </div>
-        ) : result.error ? (
+        ) : resultado.erro ? (
           <div className="h-full flex flex-col items-center justify-center text-white/70 text-sm gap-2 px-4 text-center">
-            <span>{result.error}</span>
+            <span>{resultado.erro}</span>
           </div>
         ) : (
           <>
             <div className="mb-3 rounded-lg bg-white/10 border border-white/20 px-3 py-2">
-              <p className="text-white/60 text-xs mb-0.5">{infoLabel}</p>
-              <p className={`text-xs font-medium ${c.text}`}>{result.meta}</p>
-              {'mstCost' in result && (
+              <p className="text-white/60 text-xs mb-0.5">{labelInfo}</p>
+              <p className={`text-xs font-medium ${estilos.texto}`}>{resultado.meta}</p>
+              {'custoAGM' in resultado && (
                 <p className="text-white/50 text-xs mt-0.5">
-                  Custo da AGM: {Math.round((result as ApproxResult).mstCost)}
+                  Custo da AGM: {Math.round((resultado as ResultadoAproximacao).custoAGM)}
                 </p>
               )}
             </div>
 
             <p className="text-white/60 text-xs px-1 mb-1">Tour</p>
-            {result.tour.map((id, index) => {
-              const from = graph.nodes.get(id);
-              const toId = result.tour[(index + 1) % result.tour.length];
-              const to   = graph.nodes.get(toId);
-              const drawnEdges = getDrawnEdges(graph);
-              const segCost = from && to ? drawnWeight(from.id, to.id, drawnEdges) : 0;
-              const isReturn = index === result.tour.length - 1;
+
+            {resultado.tour.map((id, indice) => {
+              const noAtual  = grafo.nos.get(id);
+              const idProximo = resultado.tour[(indice + 1) % resultado.tour.length];
+              const noProximo = grafo.nos.get(idProximo);
+              const arestasDesenhadas = obterArestasDesenhadas(grafo);
+              const custoSegmento = noAtual && noProximo
+                ? pesoAresta(noAtual.id, noProximo.id, arestasDesenhadas)
+                : 0;
+              const ehRetorno = indice === resultado.tour.length - 1;
+
               return (
                 <div
-                  key={index}
+                  key={indice}
                   className={`flex items-center gap-2 mb-1.5 rounded-lg px-3 py-2 text-sm border ${
-                    isReturn ? c.cardRet : c.card
+                    ehRetorno ? estilos.cardRet : estilos.card
                   }`}
                 >
-                  <span className={`${c.text} text-xs font-bold flex-shrink-0 w-5 text-center`}>
-                    {index + 1}
+                  <span className={`${estilos.texto} text-xs font-bold flex-shrink-0 w-5 text-center`}>
+                    {indice + 1}
                   </span>
                   <div className="flex-1 min-w-0">
                     <div className="text-white font-semibold">
-                      {from?.name}
+                      {noAtual?.nome}
                       <span className="text-white/50 font-normal"> → </span>
-                      {to?.name}
-                      {isReturn && <span className={`ml-1 ${c.text} opacity-70 text-xs`}>(retorno)</span>}
+                      {noProximo?.nome}
+                      {ehRetorno && (
+                        <span className={`ml-1 ${estilos.texto} opacity-70 text-xs`}>(retorno)</span>
+                      )}
                     </div>
-                    <div className="text-white/50 text-xs">distância {Math.round(segCost)}</div>
+                    <div className="text-white/50 text-xs">distância {Math.round(custoSegmento)}</div>
                   </div>
                 </div>
               );
             })}
 
-            <div className={`mt-2 rounded-lg ${c.total} border px-3 py-2 flex justify-between items-center`}>
-              <span className="text-white/70 text-sm">{totalLabel}</span>
-              <span className={`${c.text} font-bold text-base`}>{Math.round(result.totalCost)}</span>
+            <div className={`mt-2 rounded-lg ${estilos.total} border px-3 py-2 flex justify-between items-center`}>
+              <span className="text-white/70 text-sm">{labelTotal}</span>
+              <span className={`${estilos.texto} font-bold text-base`}>{Math.round(resultado.custoTotal)}</span>
             </div>
           </>
         )}
@@ -597,173 +769,190 @@ function TourPanel({
   );
 }
 
-// ─── App ──────────────────────────────────────────────────────────────────────
 
-type Tab = "kruskal" | "ag" | "tsp";
+
+type Aba = "aproximacao" | "genetico" | "forcaBruta";
 
 function App() {
-  const [draggingEdge, setDraggingEdge] = useState<string | null>(null);
-  const [mousePos, setMousePos] = useState<[number, number]>([0, 0]);
-  const [, forceUpdate] = useState(0);
-  const [approxResult, setApproxResult] = useState<ApproxResult | null>(null);
-  const [agResult, setAgResult] = useState<TourResult | null>(null);
-  const [tspResult, setTspResult] = useState<TourResult | null>(null);
-  const [activeTab, setActiveTab] = useState<Tab>("kruskal");
-  const [graph] = useState(() => new Graph());
-  const [nodes, setNodes] = useState<Node[]>([]);
-  const [adicionarClicked, setAdicionarClicked] = useState<boolean>(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [names, setNames] = useState<number>(0);
+  const [idArrastando, setIdArrastando]    = useState<string | null>(null);
+  const [posicaoMouse, setPosicaoMouse]    = useState<[number, number]>([0, 0]);
+  const [, forcarAtualizacao]   = useState(0);
+  const [resultadoAproximacao, setResultadoAproximacao] = useState<ResultadoAproximacao | null>(null);
+  const [resultadoAG, setResultadoAG]   = useState<ResultadoTour | null>(null);
+  const [resultadoForca, setResultadoForca]  = useState<ResultadoTour | null>(null);
+  const [abaAtiva, setAbaAtiva]  = useState<Aba>("aproximacao");
+  const [grafo]  = useState(() => new Grafo());
+  const [nos, setNos]  = useState<No[]>([]);
+  const [modoAdicionarNo, setModoAdicionarNo]   = useState<boolean>(false);
+  const [idSelecionado, setIdSelecionado]  = useState<string | null>(null);
+  const [proximoNome, setProximoNome] = useState<number>(0);
 
-  function findNode(id: string) { return nodes.find(n => n.id === id); }
+  function encontrarNo(id: string) { 
+    return nos.find(n => n.id === id); 
+  }
 
-  const nodeMap = new Map(nodes.map(n => [n.id, n]));
+  const mapaDeNos = new Map(nos.map(n => [n.id, n]));
 
-  const activeResult =
-    activeTab === "kruskal" ? approxResult :
-    activeTab === "ag"      ? agResult     : tspResult;
+  const resultadoAtivo =
+    abaAtiva === "aproximacao" ? resultadoAproximacao :
+    abaAtiva === "genetico"   ? resultadoAG           : resultadoForca;
 
-  const tourEdgeSet = activeResult && !activeResult.error && activeResult.tour.length > 1
-    ? tourToEdgeSet(activeResult.tour)
-    : undefined;
+  const arestasDoTour =
+    resultadoAtivo && !resultadoAtivo.erro && resultadoAtivo.tour.length > 1
+      ? tourParaConjuntoDeArestas(resultadoAtivo.tour)
+      : undefined;
 
   return (
     <>
-      <Header activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Header activeTab={abaAtiva} setActiveTab={setAbaAtiva} />
       <main className="w-full h-screen bg-gray-400">
         <div className="w-11/12 h-full mx-auto flex flex-row justify-between gap-2">
 
-          {/* Canvas */}
+          {/* Canvas SVG */}
           <div className="w-2/3 h-4/5 self-center">
             <svg
               width="100%" height="100%"
               className="bg-white/30 rounded-xl"
-              onMouseMove={(e) => setMousePos(pointer(e))}
-              onMouseUp={() => setDraggingEdge(null)}
+              onMouseMove={(e) => setPosicaoMouse(pointer(e))}
+              onMouseUp={() => setIdArrastando(null)}
               onClick={(e) => {
-                if (adicionarClicked) {
-                  const newNode = createNode(names, [pointer(e)[0], pointer(e)[1]]);
-                  setNodes([...nodes, newNode]);
-                  graph.addNode(newNode);
-                  setNames(names + 1);
-                  setAdicionarClicked(false);
+                if (modoAdicionarNo) {
+                  const novoNo = criarNo(proximoNome, [pointer(e)[0], pointer(e)[1]]);
+                  setNos([...nos, novoNo]);
+                  grafo.adicionarNo(novoNo);
+                  setProximoNome(proximoNome + 1);
+                  setModoAdicionarNo(false);
                 }
               }}
             >
-              {renderEdges(graph, tourEdgeSet, nodeMap)}
+              {renderizarArestas(grafo, arestasDoTour, mapaDeNos)}
 
-              {draggingEdge && (() => {
-                const source = findNode(draggingEdge);
-                if (!source) return null;
+              {/* Linha de prévia ao arrastar para criar aresta */}
+              {idArrastando && (() => {
+                const noOrigem = encontrarNo(idArrastando);
+                if (!noOrigem) return null;
                 return (
                   <line
-                    x1={source.coordinates[0]} y1={source.coordinates[1]}
-                    x2={mousePos[0]} y2={mousePos[1]}
+                    x1={noOrigem.coordenadas[0]} y1={noOrigem.coordenadas[1]}
+                    x2={posicaoMouse[0]} y2={posicaoMouse[1]}
                     stroke="white" strokeWidth={2} strokeDasharray="6"
                   />
                 );
               })()}
 
-              {nodes.map(node => (
-                <g key={node.id}>
-                  {renderNode(node, selectedId, setSelectedId, draggingEdge, setDraggingEdge, graph, () => forceUpdate(v => v + 1))}
+              {nos.map(no => (
+                <g key={no.id}>
+                  {renderizarNo(
+                    no,
+                    idSelecionado,
+                    setIdSelecionado,
+                    idArrastando,
+                    setIdArrastando,
+                    grafo,
+                    () => forcarAtualizacao(v => v + 1)
+                  )}
                 </g>
               ))}
             </svg>
           </div>
 
-          {/* Painel lateral */}
           <div className="w-1/3 flex flex-col place-content-center py-8">
             <div className="backdrop-blur-sm bg-white/30 rounded-xl w-full h-3/4 shadow-xl flex flex-col overflow-hidden">
 
               {/* Abas */}
               <div className="flex border-b border-white/20 flex-shrink-0">
-                {(["kruskal", "ag", "tsp"] as Tab[]).map((tab) => {
-                  const labels: Record<Tab, string> = { kruskal: "Aproximação", ag: "Alg. Genético", tsp: "Caixeiro" };
-                  const colors: Record<Tab, string> = { kruskal: "border-blue-400", ag: "border-green-400", tsp: "border-orange-400" };
+                {(["aproximacao", "genetico", "forcaBruta"] as Aba[]).map((aba) => {
+                  const rotulos: Record<Aba, string> = {
+                    aproximacao: "Aproximação",
+                    genetico:    "Alg. Genético",
+                    forcaBruta:  "Caixeiro"
+                  };
+                  const cores: Record<Aba, string> = {
+                    aproximacao: "border-blue-400",
+                    genetico:    "border-green-400",
+                    forcaBruta:  "border-orange-400"
+                  };
                   return (
                     <button
-                      key={tab}
-                      onClick={() => setActiveTab(tab)}
+                      key={aba}
+                      onClick={() => setAbaAtiva(aba)}
                       className={`flex-1 py-3 text-xs font-bold transition-colors ${
-                        activeTab === tab
-                          ? `text-white border-b-2 ${colors[tab]} bg-white/10`
+                        abaAtiva === aba
+                          ? `text-white border-b-2 ${cores[aba]} bg-white/10`
                           : "text-white/50 hover:text-white/80"
                       }`}
                     >
-                      {labels[tab]}
+                      {rotulos[aba]}
                     </button>
                   );
                 })}
               </div>
 
-              {/* Conteúdo das abas */}
-              {activeTab === "kruskal" && (
-                <TourPanel
-                  result={approxResult}
-                  graph={graph}
-                  color="blue"
-                  emptyLabel="Clique em Executar para calcular"
-                  emptyHint="AGM via Kruskal + DFS pré-ordem. Usa apenas arestas desenhadas."
-                  infoLabel="Método"
-                  totalLabel="Distância total"
+              {abaAtiva === "aproximacao" && (
+                <PainelTour
+                  resultado={resultadoAproximacao}
+                  grafo={grafo}
+                  cor="azul"
+                  labelVazio="Clique em Executar para calcular"
+                  dicaVazia="AGM via Kruskal + DFS pré-ordem. Usa apenas arestas desenhadas."
+                  labelInfo="Método"
+                  labelTotal="Distância total"
                 />
               )}
-              {activeTab === "ag" && (
-                <TourPanel
-                  result={agResult}
-                  graph={graph}
-                  color="green"
-                  emptyLabel="Clique em Executar para rodar"
-                  emptyHint="Genético com OX crossover, swap e mutação 2-opt. Usa apenas arestas desenhadas."
-                  infoLabel="Parâmetros"
-                  totalLabel="Distância total"
+              {abaAtiva === "genetico" && (
+                <PainelTour
+                  resultado={resultadoAG}
+                  grafo={grafo}
+                  cor="verde"
+                  labelVazio="Clique em Executar para rodar"
+                  dicaVazia="Genético com OX crossover, swap e mutação 2-opt. Usa apenas arestas desenhadas."
+                  labelInfo="Parâmetros"
+                  labelTotal="Distância total"
                 />
               )}
-              {activeTab === "tsp" && (
-                <TourPanel
-                  result={tspResult}
-                  graph={graph}
-                  color="orange"
-                  emptyLabel="Clique em Executar para calcular"
-                  emptyHint={`Testa todas as rotas pelas arestas desenhadas. Limitado a ${TSP_MAX_NODES} nós.`}
-                  infoLabel="Busca exaustiva"
-                  totalLabel="Distância total"
+              {abaAtiva === "forcaBruta" && (
+                <PainelTour
+                  resultado={resultadoForca}
+                  grafo={grafo}
+                  cor="laranja"
+                  labelVazio="Clique em Executar para calcular"
+                  dicaVazia={`Testa todas as rotas pelas arestas desenhadas. Limitado a ${MAX_NOS_FORCA_BRUTA} nós.`}
+                  labelInfo="Busca exaustiva"
+                  labelTotal="Distância total"
                 />
               )}
 
-              {/* Botões */}
               <div className="px-4 pb-4 pt-2 flex-shrink-0 border-t border-white/20">
                 <div className="grid grid-cols-3 gap-2 h-10">
                   <button
                     className="w-full h-full bg-white/20 border border-white/30 rounded-full text-white font-bold text-sm hover:bg-white/30 transition-colors"
-                    onClick={() => setAdicionarClicked(true)}
+                    onClick={() => setModoAdicionarNo(true)}
                   >
                     + Nó
                   </button>
                   <button
                     className="w-full h-full bg-white/20 border border-white/30 rounded-full text-white font-bold text-sm hover:bg-white/30 transition-colors disabled:opacity-30"
-                    disabled={!selectedId}
+                    disabled={!idSelecionado}
                     onClick={() => {
-                      if (!selectedId) return;
-                      graph.removeNode(selectedId);
-                      setNodes(prev => prev.filter(n => n.id !== selectedId));
-                      setSelectedId(null);
-                      forceUpdate(v => v + 1);
+                      if (!idSelecionado) return;
+                      grafo.removerNo(idSelecionado);
+                      setNos(prev => prev.filter(n => n.id !== idSelecionado));
+                      setIdSelecionado(null);
+                      forcarAtualizacao(v => v + 1);
                     }}
                   >
                     − Nó
                   </button>
                   <button
                     className={`w-full h-full rounded-full text-white font-bold text-sm shadow-xl transition-colors ${
-                      activeTab === "kruskal" ? "bg-blue-500 hover:bg-blue-600"
-                      : activeTab === "ag"    ? "bg-green-500 hover:bg-green-600"
-                                             : "bg-orange-500 hover:bg-orange-600"
+                      abaAtiva === "aproximacao" ? "bg-blue-500 hover:bg-blue-600"
+                      : abaAtiva === "genetico"  ? "bg-green-500 hover:bg-green-600"
+                                                 : "bg-orange-500 hover:bg-orange-600"
                     }`}
                     onClick={() => {
-                      if (activeTab === "kruskal") setApproxResult(runApproxTSP(graph));
-                      else if (activeTab === "ag")  setAgResult(runGeneticTSP(graph));
-                      else                          setTspResult(runBruteForceTSP(graph));
+                      if (abaAtiva === "aproximacao") setResultadoAproximacao(executarAproximacaoTSP(grafo));
+                      else if (abaAtiva === "genetico") setResultadoAG(executarAGTSP(grafo));
+                      else setResultadoForca(executarForcaBrutaTSP(grafo));
                     }}
                   >
                     Executar

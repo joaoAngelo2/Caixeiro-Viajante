@@ -1,11 +1,11 @@
-type Tab = "kruskal" | "ag" | "tsp";
+type Aba = "aproximacao" | "genetico" | "forcaBruta";
 
-interface HeaderProps {
-  activeTab: Tab;
-  setActiveTab: (tab: Tab) => void;
+interface PropsHeader {
+  activeTab: Aba;
+  setActiveTab: (aba: Aba) => void;
 }
 
-export default function Header({ activeTab, setActiveTab }: HeaderProps) {
+export default function Header({ activeTab, setActiveTab }: PropsHeader) {
   return (
     <header className="w-full backdrop-blur-md bg-black/25 border-b border-white/15 shadow-lg">
       <div className="w-11/12 mx-auto h-14 flex items-center justify-between">
@@ -24,27 +24,34 @@ export default function Header({ activeTab, setActiveTab }: HeaderProps) {
           </span>
         </div>
 
+        {/* Abas de navegação */}
         <div className="flex items-center bg-black/20 rounded-full p-1 gap-1">
           <button
-            onClick={() => setActiveTab("kruskal")}
+            onClick={() => setActiveTab("aproximacao")}
             className={`px-5 h-8 rounded-full text-sm font-bold transition-all duration-200 ${
-              activeTab === "kruskal" ? "bg-blue-500 text-white shadow-md" : "text-white/60 hover:text-white"
+              activeTab === "aproximacao"
+                ? "bg-blue-500 text-white shadow-md"
+                : "text-white/60 hover:text-white"
             }`}
           >
             Aproximação
           </button>
           <button
-            onClick={() => setActiveTab("ag")}
+            onClick={() => setActiveTab("genetico")}
             className={`px-5 h-8 rounded-full text-sm font-bold transition-all duration-200 ${
-              activeTab === "ag" ? "bg-green-500 text-white shadow-md" : "text-white/60 hover:text-white"
+              activeTab === "genetico"
+                ? "bg-green-500 text-white shadow-md"
+                : "text-white/60 hover:text-white"
             }`}
           >
             Alg. Genético
           </button>
           <button
-            onClick={() => setActiveTab("tsp")}
+            onClick={() => setActiveTab("forcaBruta")}
             className={`px-5 h-8 rounded-full text-sm font-bold transition-all duration-200 ${
-              activeTab === "tsp" ? "bg-orange-500 text-white shadow-md" : "text-white/60 hover:text-white"
+              activeTab === "forcaBruta"
+                ? "bg-orange-500 text-white shadow-md"
+                : "text-white/60 hover:text-white"
             }`}
           >
             Caixeiro
