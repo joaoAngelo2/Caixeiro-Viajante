@@ -1,6 +1,7 @@
 import Header from "./components/Header"
 import { useState } from "react";
 import { pointer } from 'd3';
+import React from "react";
 
 // ─── Estruturas de dados ──────────────────────────────────────────────────────
 
@@ -91,15 +92,12 @@ function getDrawnEdges(graph: Graph): Map<string, number> {
   return map;
 }
 
-/**
- * Retorna o peso da aresta desenhada entre a e b, ou Infinity se não existir.
- */
+
 function drawnWeight(a: string, b: string, drawnEdges: Map<string, number>): number {
   const key = a < b ? `${a}|${b}` : `${b}|${a}`;
   return drawnEdges.get(key) ?? Infinity;
 }
 
-// ─── Renderização SVG ─────────────────────────────────────────────────────────
 
 function renderEdges(
   graph: Graph,
@@ -107,7 +105,7 @@ function renderEdges(
   tourNodeMap?: Map<string, Node>
 ) {
   const rendered = new Set<string>();
-  const elements: JSX.Element[] = [];
+  const elements: React.JSX.Element[] = [];
 
   for (const node of graph.nodes.values()) {
     for (const edge of node.edges) {
